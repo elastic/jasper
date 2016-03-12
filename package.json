@@ -4,6 +4,9 @@
   "private": true,
   "author": "Court Ewing <court@epixa.com>",
   "description": "Never trust a bot named Jarvis",
+  "scripts": {
+    "start": "hubot --name jasper"
+  },
   "dependencies": {
     "hubot": "^2.18.0",
     "hubot-diagnostics": "0.0.1",
