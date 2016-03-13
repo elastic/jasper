@@ -6,6 +6,10 @@
 
 'use strict';
 
+const resolve = require('path').resolve;
+const mkdirp = require('mkdirp');
+const nodegit = require('nodegit');
+
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
 
@@ -37,34 +41,45 @@ module.exports = robot => {
       const merged = info.merged;
       if (!merged) return console.error('pr is not yet merged'); // todo: uncomment
 
-      // todo: do this in parallel
-      pr.commits((err, commits) => {
-        if (err) return console.error('err', err);
+      const repoDir = resolve(__dirname, '..', 'repos', repo);
+      mkdirp.sync(repoDir); // todo: unsync this
+      nodegit.Clone(info.base.repo.clone_url, repoDir)
+        .catch(err => {
+          if (err.message.indexOf('exists and is not an empty directory') === -1) {
+            return robot.emit('error', err);
+          }
+          return nodegit.Repository.open(repoDir);
+        })
+        .then(repo => {
+          // todo: do this in parallel
+          pr.commits((err, commits) => {
+            if (err) return console.error('err', err);
 
-        const backports = branches.map(version => {
-          // assert that we have appropriate labels
+            const backports = branches.map(version => {
+              // assert that we have appropriate labels
 
-          // create backport-<pull>-<version>
-          const branch = `jasper-backport-${number}-${version}`;
-          console.log(`create ${branch}`);
+              // create backport-<pull>-<version>
+              const branch = `jasper-backport-${number}-${version}`;
+              console.log(`create ${branch}`);
 
-          // cherry-pick each commit, commit any conflicts(?)
-          commits.forEach(commit => {
-            console.log(`cherry-pick ${commit.sha}`);
-          });
+              // cherry-pick each commit, commit any conflicts(?)
+              commits.forEach(commit => {
+                console.log(`cherry-pick ${commit.sha}`);
+              });
 
-          // issue PR to <version> branch, label:backport label:noconflicts
-          const labels = ['backport', 'noconflicts'];
-          console.log(`open pr to ${version} from ${branch} with labels: ${labels.join()}`);
+              // issue PR to <version> branch, label:backport label:noconflicts
+              const labels = ['backport', 'noconflicts'];
+              console.log(`open pr to ${version} from ${branch} with labels: ${labels.join()}`);
 
-          return branch;
+              return branch;
+            });
+
+            // push changes to upstream
+            console.log(`push branches to upstream: ${backports.join()}`);
+
+            res.send('done');
+          })
         });
-
-        // push changes to upstream
-        console.log(`push branches to upstream: ${backports.join()}`);
-
-        res.send('done');
-      })
     });
   });
 
