@@ -5,7 +5,8 @@
   "author": "Court Ewing <court@epixa.com>",
   "description": "Never trust a bot named Jarvis",
   "scripts": {
-    "start": "bin/hubot"
+    "start": "bin/hubot",
+    "dev": "echo \"You must exit nodemon with ctrl+d\n\" && nodemon"
   },
   "dependencies": {
     "bluebird": "^3.3.4",
@@ -24,6 +25,7 @@
     "node": "5.8.x"
   },
   "devDependencies": {
+    "nodemon": "^1.9.1",
     "yo": "^1.7.0"
   }
 }

@@ -1,0 +1,9 @@
+{
+  "exec": "./bin/hubot",
+  "ignore": [
+    "repos/",
+    "tests/",
+    "*.md"
+  ],
+  "restartable": false
+}
