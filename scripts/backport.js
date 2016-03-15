@@ -7,6 +7,7 @@
 'use strict';
 
 const resolve = require('path').resolve;
+const includes = require('lodash').includes;
 const mkdirp = require('mkdirp');
 const nodegit = require('nodegit');
 
@@ -36,7 +37,7 @@ module.exports = robot => {
       //console.log(info);
 
       const target = info.base.ref;
-      if (branches.indexOf(target) > -1) return console.error('cannot backport into original pr target branch');
+      if (includes(branches, target)) return console.error('cannot backport into original pr target branch');
 
       const merged = info.merged;
       if (!merged) return console.error('pr is not yet merged'); // todo: uncomment
@@ -45,7 +46,7 @@ module.exports = robot => {
       mkdirp.sync(repoDir); // todo: unsync this
       nodegit.Clone(info.base.repo.clone_url, repoDir)
         .catch(err => {
-          if (err.message.indexOf('exists and is not an empty directory') === -1) {
+          if (!includes(err.message, 'exists and is not an empty directory')) {
             return robot.emit('error', err);
           }
           return nodegit.Repository.open(repoDir);
