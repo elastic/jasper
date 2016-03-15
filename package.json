@@ -8,6 +8,7 @@
     "start": "hubot --name jasper"
   },
   "dependencies": {
+    "bluebird": "^3.3.4",
     "hubot": "^2.18.0",
     "hubot-diagnostics": "0.0.1",
     "hubot-help": "^0.1.3",
