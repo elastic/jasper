@@ -40,10 +40,14 @@ module.exports = robot => {
     ])
     .then(([ info, commits ]) => {
       const target = info.base.ref;
-      if (includes(branches, target)) return console.error('cannot backport into original pr target branch');
+      if (includes(branches, target)) {
+        throw new Error('Cannot backport into original PR target branch');
+      }
 
       const merged = info.merged;
-      if (!merged) return console.error('pr is not yet merged'); // todo: uncomment
+      if (!merged) {
+        throw new Error('Cannot backport unmerged pull requests');
+      }
 
       const repoDir = resolve(__dirname, '..', 'repos', repo);
       mkdirp.sync(repoDir); // todo: unsync this
