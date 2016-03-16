@@ -6,10 +6,11 @@
 
 'use strict';
 
-const resolve = require('path').resolve;
-const includes = require('lodash').includes;
 const mkdirp = require('mkdirp');
-const nodegit = require('nodegit');
+
+const { includes } = require('lodash');
+const { Clone, Repository } = require('nodegit');
+const { resolve } = require('path');
 
 const { getCommits, getInfo } = require('../src/github');
 
@@ -18,19 +19,12 @@ const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
 
 module.exports = robot => {
   robot.respond(BACKPORT_REGEX, res => {
-    const github = robot.github;
+    const { github } = robot;
 
-    const cmd = res.match.shift();
-    const url = res.match.shift();
-    const branches = res.match.shift().split(/\s+/);
-    //res.send("backport to", cmd, url, branches);
+    const [ _cmd, url, allBranches ] = res.match;
+    const branches = allBranches.split(/\s+/);
 
-    // get org/repo/pull# from url
-    const match = url.match(PR_URL_REGEX);
-    match.shift(); // get rid of first value
-    const repo = match.shift();
-    const number = match.shift();
-    console.log(repo, number);
+    const [ _url, repo, number ] = url.match(PR_URL_REGEX);
 
     const pr = github.pr(repo, number);
 
@@ -44,19 +38,19 @@ module.exports = robot => {
         throw new Error('Cannot backport into original PR target branch');
       }
 
-      const merged = info.merged;
+      const { merged } = info;
       if (!merged) {
         throw new Error('Cannot backport unmerged pull requests');
       }
 
       const repoDir = resolve(__dirname, '..', 'repos', repo);
       mkdirp.sync(repoDir); // todo: unsync this
-      return nodegit.Clone(info.base.repo.clone_url, repoDir)
+      return Clone(info.base.repo.clone_url, repoDir)
         .catch(err => {
           if (!includes(err.message, 'exists and is not an empty directory')) {
             throw err;
           }
-          return nodegit.Repository.open(repoDir);
+          return Repository.open(repoDir);
         })
         .then(repo => {
           const backports = branches.map(version => {
