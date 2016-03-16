@@ -7,10 +7,11 @@
 'use strict';
 
 const resolve = require('path').resolve;
-const promisify = require('bluebird').promisify;
 const includes = require('lodash').includes;
 const mkdirp = require('mkdirp');
 const nodegit = require('nodegit');
+
+const { getCommits, getInfo } = require('../src/github');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
@@ -33,7 +34,7 @@ module.exports = robot => {
 
     const pr = github.pr(repo, number);
 
-    promisify(pr.info.bind(pr))()
+    getInfo(pr)
       .then(info => {
         const target = info.base.ref;
         if (includes(branches, target)) return console.error('cannot backport into original pr target branch');
@@ -52,7 +53,7 @@ module.exports = robot => {
           })
           .then(repo => {
             // todo: do this in parallel
-            return promisify(pr.commits.bind(pr))().then(commits => {
+            return getCommits(pr).then(commits => {
               const backports = branches.map(version => {
                 // assert that we have appropriate labels
 

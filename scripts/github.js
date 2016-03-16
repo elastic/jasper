@@ -6,13 +6,13 @@
 
 'use strict';
 
-const promisifyAll = require('bluebird').promisifyAll;
-const octonode = require('octonode');
-const token = require('../.github-access.json').token;
-const github = octonode.client(token);
+const { token } = require('../.github-access.json');
+const { createClient } = require('../src/github');
 
 module.exports = robot => {
-  robot.github = promisifyAll(github);
+  const github = createClient(token);
+
+  robot.github = github;
 
   robot.respond(/github limit/, res => {
     github.limitAsync()
