@@ -6,13 +6,12 @@
 
 'use strict';
 
-const mkdirp = require('mkdirp');
-
 const { includes } = require('lodash');
 const { Clone, Repository } = require('nodegit');
 const { resolve } = require('path');
 
 const { getCommits, getInfo } = require('../src/github');
+const { openOrClone } = require('../src/git');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
@@ -44,39 +43,31 @@ module.exports = robot => {
       }
 
       const repoDir = resolve(__dirname, '..', 'repos', repo);
-      mkdirp.sync(repoDir); // todo: unsync this
-      return Clone(info.base.repo.clone_url, repoDir)
-        .catch(err => {
-          if (!includes(err.message, 'exists and is not an empty directory')) {
-            throw err;
-          }
-          return Repository.open(repoDir);
-        })
-        .then(repo => {
-          const backports = branches.map(version => {
-            // assert that we have appropriate labels
+      return openOrClone(repoDir, info.base.repo.clone_url).then(repo => {
+        const backports = branches.map(version => {
+          // assert that we have appropriate labels
 
-            // create backport-<pull>-<version>
-            const branch = `jasper-backport-${number}-${version}`;
-            console.log(`create ${branch}`);
+          // create backport-<pull>-<version>
+          const branch = `jasper-backport-${number}-${version}`;
+          console.log(`create ${branch}`);
 
-            // cherry-pick each commit, commit any conflicts(?)
-            commits.forEach(commit => {
-              console.log(`cherry-pick ${commit.sha}`);
-            });
-
-            // issue PR to <version> branch, label:backport label:noconflicts
-            const labels = ['backport', 'noconflicts'];
-            console.log(`open pr to ${version} from ${branch} with labels: ${labels.join()}`);
-
-            return branch;
+          // cherry-pick each commit, commit any conflicts(?)
+          commits.forEach(commit => {
+            console.log(`cherry-pick ${commit.sha}`);
           });
 
-          // push changes to upstream
-          console.log(`push branches to upstream: ${backports.join()}`);
+          // issue PR to <version> branch, label:backport label:noconflicts
+          const labels = ['backport', 'noconflicts'];
+          console.log(`open pr to ${version} from ${branch} with labels: ${labels.join()}`);
 
-          res.send('done');
+          return branch;
         });
+
+        // push changes to upstream
+        console.log(`push branches to upstream: ${backports.join()}`);
+
+        res.send('done');
+      });
     })
     .catch(err => robot.emit('error', err));
   });
