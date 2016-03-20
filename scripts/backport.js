@@ -7,14 +7,17 @@
 'use strict';
 
 const { includes } = require('lodash');
-const { Clone, Repository } = require('nodegit');
 const { resolve } = require('path');
+const { promisify } = require('bluebird');
+const request = require('request');
 
 const { getCommits, getInfo } = require('../src/github');
 const { openOrClone } = require('../src/git');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
+
+const requestGet = promisify(request.get);
 
 module.exports = robot => {
   robot.respond(BACKPORT_REGEX, res => {
@@ -42,31 +45,53 @@ module.exports = robot => {
         throw new Error('Cannot backport unmerged pull requests');
       }
 
+      const original = info.head.ref;
+
+      let num = 0;
+      const baseCommitMessage = commits.map(data => {
+        const { commit, sha } = data;
+        const { author, committer, message } = commit;
+
+        num++;
+
+        const msg = [
+          `[Commit ${num}]`,
+          `${message}\n`,
+          `Original sha: ${sha}`,
+          `Authored by ${author.name} <${author.email}> on ${author.date}`,
+          `Committed by ${committer.name} <${committer.email}> on ${committer.date}`
+        ];
+
+        return msg.join('\n'); // between lines of an individual message
+      }).join('\n\n'); // between messages
+
+      const loadDiff = requestGet(info.diff_url).then(res => res.body);
+
       const repoDir = resolve(__dirname, '..', 'repos', repo);
       return openOrClone(repoDir, info.base.repo.clone_url).then(repo => {
-        const backports = branches.map(version => {
-          // assert that we have appropriate labels
+        return branches
+          .reduce((promise, target) => {
+            const backportBranch = `jasper/backport/${number}-${target}-${original}`;
 
-          // create backport-<pull>-<version>
-          const branch = `jasper-backport-${number}-${version}`;
-          console.log(`create ${branch}`);
+            const commitMessage = `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
 
-          // cherry-pick each commit, commit any conflicts(?)
-          commits.forEach(commit => {
-            console.log(`cherry-pick ${commit.sha}`);
-          });
+            return promise
+              .then(() => repo.getReferenceCommit(`origin/${target}`))
+              .then(commit => repo.createBranch(backportBranch, commit))
+              .then(() => repo.checkoutBranch(backportBranch))
+              .then(() => loadDiff)
+              .then(diff => {
+                console.log(`\n${commitMessage}`);
+                console.log(`\n\n${diff}`);
 
-          // issue PR to <version> branch, label:backport label:noconflicts
-          const labels = ['backport', 'noconflicts'];
-          console.log(`open pr to ${version} from ${branch} with labels: ${labels.join()}`);
-
-          return branch;
-        });
-
-        // push changes to upstream
-        console.log(`push branches to upstream: ${backports.join()}`);
-
-        res.send('done');
+                // todo: issue PR to <target> branch, label:backport label:noconflicts
+              });
+          }, repo.fetch('origin'))
+          .then(() => {
+            // todo: push all branches
+            const allBranches = branches.join(', ');
+            res.send(`Backported pull request #${number} to ${allBranches}`);
+          })
       });
     })
     .catch(err => robot.emit('error', err));
