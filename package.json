@@ -18,7 +18,8 @@
     "hubot-slack": "^3.4.2",
     "lodash": "^4.6.1",
     "nodegit": "^0.11.9",
-    "octonode": "^0.7.4"
+    "octonode": "^0.7.4",
+    "tmp": "0.0.28"
   },
   "engines": {
     "node": "5.8.x"
