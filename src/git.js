@@ -7,8 +7,8 @@ const { Clone, Repository, Signature } = require('nodegit');
 
 const statAsync = promisify(stat);
 
-function clone(url, path) {
-  return Clone(url, path);
+function clone(url, path, fetchOpts) {
+  return Clone(url, path, { fetchOpts });
 }
 
 function getSignature() {
@@ -19,10 +19,10 @@ function open(path) {
   return Repository.open(path);
 }
 
-function openOrClone(path, url) {
+function openOrClone(path, url, fetchOpts) {
   return statAsync(path)
     .then(() => open(path))
-    .catch({ code: 'ENOENT' }, () => clone(url, path));
+    .catch({ code: 'ENOENT' }, () => clone(url, path, fetchOpts));
 }
 
 module.exports = {

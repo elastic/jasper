@@ -8,9 +8,10 @@
 
 const { execFile } = require('child_process');
 const fs = require('fs');
+const { homedir } = require('os');
 
 const { includes } = require('lodash');
-const { resolve } = require('path');
+const { join, resolve } = require('path');
 const { promisify } = require('bluebird');
 const request = require('request');
 const tmp = require('tmp');
@@ -82,11 +83,32 @@ module.exports = robot => {
           });
         });
 
+      function backportBranchName(target) {
+        return `jasper/backport/${number}-${target}-${original}`;
+      }
+
+      const { Cred } = require('nodegit');
+      const fetchOpts = {
+        callbacks: {
+          credentials(url, userName) {
+            return Cred.sshKeyNew(
+              userName,
+              join(homedir(), '.ssh', 'jasper_id_rsa.pub'),
+              join(homedir(), '.ssh', 'jasper_id_rsa'),
+              ''
+            );
+          },
+          certificateCheck() {
+            return 1;
+          }
+        }
+      };
+
       const repoDir = resolve(__dirname, '..', 'repos', repo);
-      return openOrClone(repoDir, info.base.repo.clone_url).then(repo => {
+      return openOrClone(repoDir, info.base.repo.ssh_url, fetchOpts).then(repo => {
         return branches
           .reduce((promise, target) => {
-            const backportBranch = `jasper/backport/${number}-${target}-${original}`;
+            const backportBranch = backportBranchName(target);
 
             const commitMessage = `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
 
@@ -127,9 +149,20 @@ module.exports = robot => {
                   );
                 });
               });
-          }, repo.fetch('origin'))
+          }, repo.fetch('origin', fetchOpts))
           .then(() => {
-            // todo: push all backport branches
+            return repo.getRemote('origin')
+              .then(remote => {
+                return branches
+                  .map(backportBranchName)
+                  .map(branch => {
+                    const ref = `refs/heads/${branch}`;
+                    return [`${ref}:${ref}`];
+                  })
+                  .reduce((promise, refs) => {
+                    return promise.then(() => remote.push(refs, fetchOpts));
+                  }, Promise.resolve()); // libgit2 throws if this happens in parallel
+              });
           })
           .then(() => {
             // todo: issue PRs from all backport branches, label:backport label:noconflicts
