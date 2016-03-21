@@ -16,7 +16,7 @@ const { promisify } = require('bluebird');
 const request = require('request');
 const tmp = require('tmp');
 
-const { getCommits, getInfo } = require('../src/github');
+const { createIssue, createPullRequest, getCommits, getInfo } = require('../src/github');
 const { openOrClone, getSignature } = require('../src/git');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
@@ -36,6 +36,7 @@ module.exports = robot => {
 
     const [ _url, repo, number ] = url.match(PR_URL_REGEX);
 
+    const githubRepo = github.repo(repo);
     const pr = github.pr(repo, number);
 
     Promise.all([
@@ -165,7 +166,29 @@ module.exports = robot => {
               });
           })
           .then(() => {
-            // todo: issue PRs from all backport branches, label:backport label:noconflicts
+            return Promise.all(
+              branches
+                .map(target => {
+                  const backportBranch = backportBranchName(target);
+
+                  const params = {
+                    title: `[backport] PR #${number} to ${target}`,
+                    body: `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`,
+                    assignee: info.merged_by.login,
+                    labels: [ 'backport' ]
+                  };
+
+                  return createIssue(githubRepo, params)
+                    .then(issue => {
+                      const params = {
+                        issue: issue.number,
+                        head: backportBranch,
+                        base: target
+                      };
+                      return createPullRequest(githubRepo, params);
+                    });
+                })
+            );
           })
           .then(() => {
             cleanupTmp();
