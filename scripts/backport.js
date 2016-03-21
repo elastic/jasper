@@ -105,6 +105,8 @@ module.exports = robot => {
         }
       };
 
+      const branchesWithConflicts = [];
+
       const repoDir = resolve(__dirname, '..', 'repos', repo);
       return openOrClone(repoDir, info.base.repo.ssh_url, fetchOpts).then(repo => {
         return branches
@@ -112,6 +114,8 @@ module.exports = robot => {
             const backportBranch = backportBranchName(target);
 
             const commitMessage = `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
+
+            let hasConflicts = false;
 
             return promise
               .then(() => repo.getReferenceCommit(`origin/${target}`))
@@ -122,8 +126,11 @@ module.exports = robot => {
                 return new Promise((resolve, reject) => {
                   const cwd = repoDir;
                   execFile('git', ['apply', '--3way', path], { cwd }, (err) => {
-                    if (err && !CONFLICTS_REGEX.test(err.message)) {
-                      return reject(err);
+                    if (err) {
+                      if (!CONFLICTS_REGEX.test(err.message)) {
+                        return reject(err);
+                      }
+                      branchesWithConflicts.push(target);
                     }
                     resolve();
                   });
@@ -177,6 +184,10 @@ module.exports = robot => {
                     assignee: info.merged_by.login,
                     labels: [ 'backport' ]
                   };
+
+                  if (includes(branchesWithConflicts, target)) {
+                    params.labels.push('has conflicts');
+                  }
 
                   return createIssue(githubRepo, params)
                     .then(issue => {
