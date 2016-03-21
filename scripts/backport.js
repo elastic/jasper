@@ -6,6 +6,7 @@
 
 'use strict';
 
+const { execFile } = require('child_process');
 const fs = require('fs');
 
 const { includes } = require('lodash');
@@ -15,10 +16,11 @@ const request = require('request');
 const tmp = require('tmp');
 
 const { getCommits, getInfo } = require('../src/github');
-const { openOrClone } = require('../src/git');
+const { openOrClone, getSignature } = require('../src/git');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
+const CONFLICTS_REGEX = /applied patch to \'.+\' with conflicts/i;
 
 const requestGet = promisify(request.get);
 const tmpFile = promisify(tmp.file, { multiArgs: true });
@@ -70,11 +72,13 @@ module.exports = robot => {
         return msg.join('\n'); // between lines of an individual message
       }).join('\n\n'); // between messages
 
+      let cleanupTmp = () => {};
       const diffFile = requestGet(info.diff_url)
         .then(res => res.body)
         .then(diff => {
           return tmpFile({ prefix: 'jasper-' }).then(([ path, fd, cleanup ]) => {
-            return writeFile(path, diff).then(() => [ path, cleanup ]);
+            cleanupTmp = cleanup;
+            return writeFile(path, diff).then(() => path);
           });
         });
 
@@ -91,16 +95,47 @@ module.exports = robot => {
               .then(commit => repo.createBranch(backportBranch, commit))
               .then(() => repo.checkoutBranch(backportBranch))
               .then(() => diffFile)
-              .then(([ path, cleanup ]) => {
-                console.log(`\n${commitMessage}`);
-                console.log(`\n\n${path}`);
-
-                // todo: issue PR to <target> branch, label:backport label:noconflicts
-                cleanup();
+              .then(path => {
+                return new Promise((resolve, reject) => {
+                  const cwd = repoDir;
+                  execFile('git', ['apply', '--3way', path], { cwd }, (err) => {
+                    if (err && !CONFLICTS_REGEX.test(err.message)) {
+                      return reject(err);
+                    }
+                    resolve();
+                  });
+                });
+              })
+              .then(() => repo.index())
+              .then(index => {
+                return index.addAll('.')
+                  .then(() => index.write())
+                  .then(() => index.writeTree());
+              })
+              .then(treeOid => {
+                return Promise.all([
+                  repo.getHeadCommit(),
+                  getSignature()
+                ]).then(([parent, signature]) => {
+                  return repo.createCommit(
+                    'HEAD',
+                    signature,
+                    signature,
+                    commitMessage,
+                    treeOid,
+                    [parent]
+                  );
+                });
               });
           }, repo.fetch('origin'))
           .then(() => {
-            // todo: push all branches
+            // todo: push all backport branches
+          })
+          .then(() => {
+            // todo: issue PRs from all backport branches, label:backport label:noconflicts
+          })
+          .then(() => {
+            cleanupTmp();
             const allBranches = branches.join(', ');
             res.send(`Backported pull request #${number} to ${allBranches}`);
           })

@@ -3,12 +3,16 @@
 const { stat } = require('fs');
 
 const { promisify } = require('bluebird');
-const { Clone, Repository } = require('nodegit');
+const { Clone, Repository, Signature } = require('nodegit');
 
 const statAsync = promisify(stat);
 
 function clone(url, path) {
   return Clone(url, path);
+}
+
+function getSignature() {
+  return Signature.now('Elastic Jasper', 'court+jasper@elastic.co');
 }
 
 function open(path) {
@@ -23,6 +27,7 @@ function openOrClone(path, url) {
 
 module.exports = {
   clone,
+  getSignature,
   open,
   openOrClone
 };
