@@ -2,6 +2,9 @@
 
 const octonode = require('octonode');
 const { promisify, promisifyAll } = require('bluebird');
+const request = require('request');
+
+const requestGet = promisify(request.get);
 
 function createClient(token) {
   const client = octonode.client(token);
@@ -28,6 +31,12 @@ function getCommits(resource) {
   return promisify(resource.commits, { context: resource })();
 }
 
+function getDiff(pr) {
+  const { repo, number } = pr;
+  const url = `https://patch-diff.githubusercontent.com/raw/${repo}/pull/${number}.diff`;
+  return requestGet(url).then(res => res.body);
+}
+
 function getInfo(resource) {
   return promisify(resource.info, { context: resource })();
 }
@@ -37,5 +46,6 @@ module.exports = {
   createIssue,
   createPullRequest,
   getCommits,
+  getDiff,
   getInfo
 };

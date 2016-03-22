@@ -6,26 +6,16 @@
 
 'use strict';
 
-const { execFile } = require('child_process');
-const fs = require('fs');
-const { homedir } = require('os');
-
 const { includes } = require('lodash');
-const { join, resolve } = require('path');
-const { promisify } = require('bluebird');
-const request = require('request');
-const tmp = require('tmp');
+const { resolve } = require('path');
 
-const { createIssue, createPullRequest, getCommits, getInfo } = require('../src/github');
+const { createIssue, createPullRequest, getCommits, getDiff, getInfo } = require('../src/github');
 const { openOrClone } = require('../src/git');
+const { createTmpFile } = require('../src/tmp');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
 const CONFLICTS_REGEX = /applied patch to \'.+\' with conflicts/i;
-
-const requestGet = promisify(request.get);
-const tmpFile = promisify(tmp.file, { multiArgs: true });
-const writeFile = promisify(fs.writeFile);
 
 module.exports = robot => {
   robot.respond(BACKPORT_REGEX, res => {
@@ -41,9 +31,10 @@ module.exports = robot => {
 
     Promise.all([
       getInfo(pr),
-      getCommits(pr)
+      getCommits(pr),
+      getDiff(pr)
     ])
-    .then(([ info, commits ]) => {
+    .then(([ info, commits, diff ]) => {
       const target = info.base.ref;
       if (includes(branches, target)) {
         throw new Error('Cannot backport into original PR target branch');
@@ -75,14 +66,10 @@ module.exports = robot => {
       }).join('\n\n'); // between messages
 
       let cleanupTmp = () => {};
-      const diffFile = requestGet(info.diff_url)
-        .then(res => res.body)
-        .then(diff => {
-          return tmpFile({ prefix: 'jasper-' }).then(([ path, fd, cleanup ]) => {
-            cleanupTmp = cleanup;
-            return writeFile(path, diff).then(() => path);
-          });
-        });
+      const diffFile = createTmpFile(diff).then(([ path, destroy ]) => {
+        cleanupTmp = destroy;
+        return path;
+      });
 
       function backportBranchName(target) {
         return `jasper/backport/${number}-${target}-${original}`;
