@@ -2,11 +2,11 @@
 
 const { execFile } = require('child_process');
 
-module.exports = function (path) {
-  return (cmd, ...args) => gitexec(path, cmd, ...args);
+module.exports = function gitcli(path) {
+  return (cmd, ...args) => execgit(path, cmd, ...args);
 };
 
-function gitexec(cwd, cmd, ...args) {
+function execgit(cwd, cmd, ...args) {
   return new Promise((resolve, reject) => {
     execFile('git', [cmd, ...args], { cwd }, err => {
       if (err) reject(err)

@@ -3,7 +3,7 @@
 const { stat } = require('fs');
 
 const { promisify } = require('bluebird');
-const gitcli = require('./gitexec');
+const gitcli = require('./gitcli');
 
 const statAsync = promisify(stat);
 
