@@ -116,11 +116,12 @@ module.exports = robot => {
               .then(() => git('commit', '-m', commitMessage));
           }, git('fetch', 'origin'))
           .then(() => {
-            return branches
-              .map(backportBranchName)
-              .reduce((promise, branch) => {
-                return promise.then(() => git('push', 'origin', branch));
-              }, Promise.resolve());
+            return Promise.all(
+              branches
+                .map(backportBranchName)
+                .map(branch => `${branch}:${branch}`)
+                .map(refspec => git('push', 'origin', refspec))
+            );
           })
           .then(() => {
             return Promise.all(
