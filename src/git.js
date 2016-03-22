@@ -3,31 +3,27 @@
 const { stat } = require('fs');
 
 const { promisify } = require('bluebird');
-const { Clone, Repository, Signature } = require('nodegit');
+const gitcli = require('./gitexec');
 
 const statAsync = promisify(stat);
 
-function clone(url, path, fetchOpts) {
-  return Clone(url, path, { fetchOpts });
-}
-
-function getSignature() {
-  return Signature.now('Elastic Jasper', 'court+jasper@elastic.co');
+function clone(url, path) {
+  const git = gitcli();
+  return git('clone', url, path).then(() => open(path));
 }
 
 function open(path) {
-  return Repository.open(path);
+  return gitcli(path);
 }
 
-function openOrClone(path, url, fetchOpts) {
+function openOrClone(path, url) {
   return statAsync(path)
     .then(() => open(path))
-    .catch({ code: 'ENOENT' }, () => clone(url, path, fetchOpts));
+    .catch({ code: 'ENOENT' }, () => clone(url, path));
 }
 
 module.exports = {
   clone,
-  getSignature,
   open,
   openOrClone
 };

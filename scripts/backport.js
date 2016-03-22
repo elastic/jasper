@@ -16,9 +16,8 @@ const { promisify } = require('bluebird');
 const request = require('request');
 const tmp = require('tmp');
 
-const gitcli = require('../src/gitexec');
 const { createIssue, createPullRequest, getCommits, getInfo } = require('../src/github');
-const { openOrClone, getSignature } = require('../src/git');
+const { openOrClone } = require('../src/git');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
@@ -89,29 +88,10 @@ module.exports = robot => {
         return `jasper/backport/${number}-${target}-${original}`;
       }
 
-      const { Cred } = require('nodegit');
-      const fetchOpts = {
-        callbacks: {
-          credentials(url, userName) {
-            return Cred.sshKeyNew(
-              userName,
-              join(homedir(), '.ssh', 'jasper_id_rsa.pub'),
-              join(homedir(), '.ssh', 'jasper_id_rsa'),
-              ''
-            );
-          },
-          certificateCheck() {
-            return 1;
-          }
-        }
-      };
-
       const branchesWithConflicts = [];
 
       const repoDir = resolve(__dirname, '..', 'repos', repo);
-      const git = gitcli(repoDir);
-
-      return openOrClone(repoDir, info.base.repo.ssh_url, fetchOpts).then(repo => {
+      return openOrClone(repoDir, info.base.repo.ssh_url).then(git => {
         return branches
           .reduce((promise, target) => {
             const backportBranch = backportBranchName(target);
@@ -121,9 +101,8 @@ module.exports = robot => {
             let hasConflicts = false;
 
             return promise
-              .then(() => repo.getReferenceCommit(`origin/${target}`))
-              .then(commit => repo.createBranch(backportBranch, commit))
-              .then(() => repo.checkoutBranch(backportBranch))
+              .then(() => git('checkout', target))
+              .then(() => git('checkout', '-b', backportBranch))
               .then(() => diffFile)
               .then(path => {
                 return git('apply', '--3way', path).catch(err => {
@@ -133,41 +112,15 @@ module.exports = robot => {
                   branchesWithConflicts.push(target);
                 });
               })
-              .then(() => repo.index())
-              .then(index => {
-                return index.addAll('.')
-                  .then(() => index.write())
-                  .then(() => index.writeTree());
-              })
-              .then(treeOid => {
-                return Promise.all([
-                  repo.getHeadCommit(),
-                  getSignature()
-                ]).then(([parent, signature]) => {
-                  return repo.createCommit(
-                    'HEAD',
-                    signature,
-                    signature,
-                    commitMessage,
-                    treeOid,
-                    [parent]
-                  );
-                });
-              });
-          }, repo.fetch('origin', fetchOpts))
+              .then(() => git('add', '.'))
+              .then(() => git('commit', '-m', commitMessage));
+          }, git('fetch', 'origin'))
           .then(() => {
-            return repo.getRemote('origin')
-              .then(remote => {
-                return branches
-                  .map(backportBranchName)
-                  .map(branch => {
-                    const ref = `refs/heads/${branch}`;
-                    return [`${ref}:${ref}`];
-                  })
-                  .reduce((promise, refs) => {
-                    return promise.then(() => remote.push(refs, fetchOpts));
-                  }, Promise.resolve()); // libgit2 throws if this happens in parallel
-              });
+            return branches
+              .map(backportBranchName)
+              .reduce((promise, branch) => {
+                return promise.then(() => git('push', 'origin', branch));
+              }, Promise.resolve());
           })
           .then(() => {
             return Promise.all(
