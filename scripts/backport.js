@@ -16,6 +16,7 @@ const { promisify } = require('bluebird');
 const request = require('request');
 const tmp = require('tmp');
 
+const gitcli = require('../src/gitexec');
 const { createIssue, createPullRequest, getCommits, getInfo } = require('../src/github');
 const { openOrClone, getSignature } = require('../src/git');
 
@@ -108,6 +109,8 @@ module.exports = robot => {
       const branchesWithConflicts = [];
 
       const repoDir = resolve(__dirname, '..', 'repos', repo);
+      const git = gitcli(repoDir);
+
       return openOrClone(repoDir, info.base.repo.ssh_url, fetchOpts).then(repo => {
         return branches
           .reduce((promise, target) => {
@@ -123,17 +126,11 @@ module.exports = robot => {
               .then(() => repo.checkoutBranch(backportBranch))
               .then(() => diffFile)
               .then(path => {
-                return new Promise((resolve, reject) => {
-                  const cwd = repoDir;
-                  execFile('git', ['apply', '--3way', path], { cwd }, (err) => {
-                    if (err) {
-                      if (!CONFLICTS_REGEX.test(err.message)) {
-                        return reject(err);
-                      }
-                      branchesWithConflicts.push(target);
-                    }
-                    resolve();
-                  });
+                return git('apply', '--3way', path).catch(err => {
+                  if (!CONFLICTS_REGEX.test(err.message)) {
+                    throw err;
+                  }
+                  branchesWithConflicts.push(target);
                 });
               })
               .then(() => repo.index())
