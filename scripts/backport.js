@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { includes } = require('lodash');
+const { includes, once } = require('lodash');
 const { resolve } = require('path');
 
 const { createIssue, createPullRequest, getCommits, getDiff, getInfo } = require('../src/github');
@@ -66,13 +66,21 @@ module.exports = robot => {
       }).join('\n\n'); // between messages
 
       let cleanupTmp = () => {};
-      const diffFile = createTmpFile(diff).then(([ path, destroy ]) => {
-        cleanupTmp = destroy;
-        return path;
-      });
+      const diffPath = once(() => (
+        createTmpFile(diff).then(([ path, destroy ]) => {
+          // since we don't actually kill the jasper process at the end of
+          // backporting, we need to manually destroy the tmp file
+          cleanupTmp = destroy;
+          return path;
+        })
+      ));
 
       function backportBranchName(target) {
         return `jasper/backport/${number}-${target}-${original}`;
+      }
+
+      function backportCommitMsg(target) {
+        return `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
       }
 
       const branchesWithConflicts = [];
@@ -81,28 +89,21 @@ module.exports = robot => {
       return openOrClone(repoDir, info.base.repo.ssh_url).then(git => {
         return branches
           .reduce((promise, target) => {
-            const backportBranch = backportBranchName(target);
-
-            const commitMessage = `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
-
-            let hasConflicts = false;
-
             return promise
               .then(() => git('checkout', target))
-              .then(() => git('checkout', '-b', backportBranch))
-              .then(() => diffFile)
+              .then(() => git('checkout', '-b', backportBranchName(target)))
+              .then(() => diffPath())
               .then(path => {
                 return git('apply', '--3way', path).catch(err => {
-                  if (!CONFLICTS_REGEX.test(err.message)) {
-                    throw err;
-                  }
+                  if (!CONFLICTS_REGEX.test(err.message)) throw err;
                   branchesWithConflicts.push(target);
                 });
               })
               .then(() => git('add', '.'))
-              .then(() => git('commit', '-m', commitMessage));
+              .then(() => git('commit', '-m', backportCommitMsg(target)));
           }, git('fetch', 'origin'))
           .then(() => {
+            cleanupTmp();
             return Promise.all(
               branches
                 .map(backportBranchName)
@@ -112,35 +113,28 @@ module.exports = robot => {
           })
           .then(() => {
             return Promise.all(
-              branches
-                .map(target => {
-                  const backportBranch = backportBranchName(target);
+              branches.map(base => {
+                const head = backportBranchName(base);
 
-                  const params = {
-                    title: `[backport] PR #${number} to ${target}`,
-                    body: `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`,
-                    assignee: info.merged_by.login,
-                    labels: [ 'backport' ]
-                  };
+                const params = {
+                  title: `[backport] PR #${number} to ${base}`,
+                  body: backportCommitMsg(base),
+                  assignee: info.merged_by.login,
+                  labels: [ 'backport' ]
+                };
 
-                  if (includes(branchesWithConflicts, target)) {
-                    params.labels.push('has conflicts');
-                  }
+                if (includes(branchesWithConflicts, base)) {
+                  params.labels.push('has conflicts');
+                }
 
-                  return createIssue(githubRepo, params)
-                    .then(issue => {
-                      const params = {
-                        issue: issue.number,
-                        head: backportBranch,
-                        base: target
-                      };
-                      return createPullRequest(githubRepo, params);
-                    });
-                })
+                return createIssue(githubRepo, params).then(({ number }) => {
+                  const issue = number;
+                  return createPullRequest(githubRepo, { base, head, issue });
+                });
+              })
             );
           })
           .then(() => {
-            cleanupTmp();
             const allBranches = branches.join(', ');
             res.send(`Backported pull request #${number} to ${allBranches}`);
           })
