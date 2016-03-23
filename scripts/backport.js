@@ -80,7 +80,7 @@ module.exports = robot => {
       }
 
       function backportCommitMsg(target) {
-        return `Backport PR #${number} to ${target}\n\n${baseCommitMessage}`;
+        return `Backport PR #${number}\n\n${baseCommitMessage}`;
       }
 
       const branchesWithConflicts = [];
