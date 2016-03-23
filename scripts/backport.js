@@ -55,12 +55,16 @@ module.exports = robot => {
         num++;
 
         const msg = [
-          `[Commit ${num}]`,
-          `${message}\n`,
-          `Original sha: ${sha}`,
-          `Authored by ${author.name} <${author.email}> on ${author.date}`,
-          `Committed by ${committer.name} <${committer.email}> on ${committer.date}`
+          `**Commit ${num}:**`,
+          `${message}`,
+          '\n',
+          `* Original sha: ${sha}`,
+          `* Authored by ${author.name} <${author.email}> on ${author.date}`
         ];
+
+        if (author.email !== committer.email) {
+          msg.push(`* Committed by ${committer.name} <${committer.email}> on ${committer.date}`);
+        }
 
         return msg.join('\n'); // between lines of an individual message
       }).join('\n\n'); // between messages
@@ -80,7 +84,7 @@ module.exports = robot => {
       }
 
       function backportCommitMsg(target) {
-        return `Backport PR #${number}\n\n${baseCommitMessage}`;
+        return `Backport PR #${number}\n---------\n\n${baseCommitMessage}`;
       }
 
       const branchesWithConflicts = [];
