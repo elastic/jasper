@@ -76,7 +76,7 @@ module.exports = robot => {
       ));
 
       function backportBranchName(target) {
-        return `jasper/backport/${number}-${target}-${original}`;
+        return `jasper/backport/${number}-${target}`;
       }
 
       function backportCommitMsg(target) {
