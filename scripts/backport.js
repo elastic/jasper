@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { includes, once } = require('lodash');
+const { cloneDeep, includes, once } = require('lodash');
 const { resolve } = require('path');
 
 const { createIssue, createPullRequest, getCommits, getDiff, getInfo } = require('../src/github');
@@ -17,58 +17,118 @@ const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
 const CONFLICTS_REGEX = /applied patch to \'.+\' with conflicts/i;
 
+function areDifferentPrs(pr1, pr2) {
+  return pr1.number !== pr2.number;
+}
+
 module.exports = robot => {
   robot.respond(BACKPORT_REGEX, res => {
     const { github } = robot;
 
     const [ _cmd, url, allBranches ] = res.match;
-    const branches = allBranches.split(/\s+/);
+    const targetBranches = allBranches.split(/\s+/);
 
     const [ _url, repo, number ] = url.match(PR_URL_REGEX);
 
     const githubRepo = github.repo(repo);
     const pr = github.pr(repo, number);
 
-    Promise.all([
-      getInfo(pr),
-      getCommits(pr),
-      getDiff(pr)
-    ])
-    .then(([ info, commits, diff ]) => {
-      const target = info.base.ref;
-      if (includes(branches, target)) {
-        throw new Error('Cannot backport into original PR target branch');
+    // The working PR is from the url specified in the backport command
+    getInfo(pr)
+
+    // The accumulator builds toward [ workingPr, originalPr, msg, diff ]
+    .then(workingPr => {
+      const { base, merged } = workingPr;
+
+      if (includes(targetBranches, base.ref)) {
+        throw new Error('Cannot backport into the same branch as the pull request itself');
       }
 
-      const { merged } = info;
       if (!merged) {
         throw new Error('Cannot backport unmerged pull requests');
       }
 
-      const original = info.head.ref;
+      // todo: check for 'has conflicts' label
 
-      let num = 0;
-      const baseCommitMessage = commits.map(data => {
-        const { commit, sha } = data;
-        const { author, committer, message } = commit;
+      return [ workingPr ];
+    })
 
-        num++;
+    // When the working PR is a backport, then we also grab the original PR
+    // that was being backported. If the working PR is not a backport, then
+    // both the working and original PRs are the same.
+    .then(accumulator => {
+      const [ workingPr ] = accumulator;
+
+      const { base, body } = workingPr;
+
+      const matches = body.match(/^\s*backport pr #(\d+)\s*\n---/i);
+      if (!matches) {
+        return [ ...accumulator, cloneDeep(workingPr) ];
+      }
+
+      const [ _body, number ] = matches;
+      const repo = base.repo.full_name;
+      const pr = github.pr(repo, number);
+      return getInfo(pr).then(originalPr => [ ...accumulator, originalPr ]);
+    })
+
+    // The pr/commit message gets built from the original PR's commits unless
+    // we're using a different working PR. In that case, we inherit the working
+    // PR's body.
+    .then(accumulator => {
+      const [ workingPr, originalPr ] = accumulator;
+
+      if (areDifferentPrs(workingPr, originalPr)) {
+        return [ ...accumulator, workingPr.body ];
+      }
+
+      const { number } = workingPr;
+      const repo = workingPr.base.repo.full_name;
+      const pr = github.pr(repo, number);
+      return getCommits(pr).then(commits => {
+        let num = 0;
+
+        const commitMsgs = commits.map(data => {
+          const { commit, sha } = data;
+          const { author, committer, message } = commit;
+
+          num++;
+
+          const msg = [
+            `**Commit ${num}:**`,
+            `${message}\n`,
+            `* Original sha: ${sha}`,
+            `* Authored by ${author.name} <${author.email}> on ${author.date}`
+          ];
+
+          if (author.email !== committer.email) {
+            msg.push(`* Committed by ${committer.name} <${committer.email}> on ${committer.date}`);
+          }
+
+          return msg.join('\n'); // between lines of an individual message
+        }).join('\n\n'); // between messages
 
         const msg = [
-          `**Commit ${num}:**`,
-          `${message}`,
-          '\n',
-          `* Original sha: ${sha}`,
-          `* Authored by ${author.name} <${author.email}> on ${author.date}`
-        ];
+          `Backport PR #${number}`,
+          '---------\n',
+          commitMsgs
+        ].join('\n');
 
-        if (author.email !== committer.email) {
-          msg.push(`* Committed by ${committer.name} <${committer.email}> on ${committer.date}`);
-        }
+        return [ ...accumulator, msg ];
+      });
+    })
 
-        return msg.join('\n'); // between lines of an individual message
-      }).join('\n\n'); // between messages
+    .then(accumulator => {
+      const [ workingPr ] = accumulator;
 
+      const { number } = workingPr;
+      const repo = workingPr.base.repo.full_name;
+      const pr = github.pr(repo, number);
+      return getDiff(pr).then(diff => [ ...accumulator, diff ]);
+    })
+
+    // we have all of the remote information we need to make this happen
+    .then(([ workingPr, originalPr, msg, diff ]) => {
       let cleanupTmp = () => {};
       const diffPath = once(() => (
         createTmpFile(diff).then(([ path, destroy ]) => {
@@ -79,19 +139,19 @@ module.exports = robot => {
         })
       ));
 
-      function backportBranchName(target) {
-        return `jasper/backport/${number}-${target}`;
-      }
+      const fromProxyPr = () => areDifferentPrs(workingPr, originalPr);
 
-      function backportCommitMsg(target) {
-        return `Backport PR #${number}\n---------\n\n${baseCommitMessage}`;
+      function backportBranchName(target) {
+        // this must include working PR until we allow commandeering branches
+        return `jasper/backport/${originalPr.number}/${workingPr.number}/${target}`;
       }
 
       const branchesWithConflicts = [];
 
-      const repoDir = resolve(__dirname, '..', 'repos', repo);
-      return openOrClone(repoDir, info.base.repo.ssh_url).then(git => {
-        return branches
+      const repo = workingPr.base.repo;
+      const repoDir = resolve(__dirname, '..', 'repos', repo.full_name);
+      return openOrClone(repoDir, repo.ssh_url).then(git => {
+        return targetBranches
           .reduce((promise, target) => {
             return promise
               .then(() => git('checkout', target))
@@ -104,12 +164,12 @@ module.exports = robot => {
                 });
               })
               .then(() => git('add', '.'))
-              .then(() => git('commit', '-m', backportCommitMsg(target)));
+              .then(() => git('commit', '-m', msg));
           }, git('fetch', 'origin'))
           .then(() => {
-            cleanupTmp();
+            cleanupTmp(); // we're done with the diff file
             return Promise.all(
-              branches
+              targetBranches
                 .map(backportBranchName)
                 .map(branch => `${branch}:${branch}`)
                 .map(refspec => git('push', 'origin', refspec))
@@ -117,33 +177,66 @@ module.exports = robot => {
           })
           .then(() => {
             return Promise.all(
-              branches.map(base => {
-                const head = backportBranchName(base);
+              targetBranches.map(target => {
+                const head = backportBranchName(target);
+
+                const { merged_by, number } = originalPr;
+
+                let body = msg;
+                if (fromProxyPr()) {
+                  body = [
+                    msg,
+                    `\n-------------------------------`,
+                    `**Backported based on diff from PR #${workingPr.number}**`
+                  ].join('\n')
+                }
 
                 const params = {
-                  title: `[backport] PR #${number} to ${base}`,
-                  body: backportCommitMsg(base),
-                  assignee: info.merged_by.login,
+                  title: `[backport] PR #${number} to ${target}`,
+                  body,
+                  assignee: merged_by.login,
                   labels: [ 'backport' ]
                 };
 
-                if (includes(branchesWithConflicts, base)) {
+                if (includes(branchesWithConflicts, target)) {
                   params.labels.push('has conflicts');
                 }
 
                 return createIssue(githubRepo, params).then(({ number }) => {
                   const issue = number;
+                  const base = target;
                   return createPullRequest(githubRepo, { base, head, issue });
                 });
               })
             );
           })
           .then(() => {
-            const allBranches = branches.join(', ');
-            res.send(`Backported pull request #${number} to ${allBranches}`);
+            const allBranches = targetBranches.join(', ');
+            const PR = targetBranches.length === 1 ? 'pull request' : 'pull requests';
+            const msg = [
+              `Created backport ${PR} for #${originalPr.number} to ${allBranches}`
+            ];
+            if (fromProxyPr()) {
+              msg.push(` (via PR #${workingPr.number})`);
+            }
+            if (branchesWithConflicts.length) {
+              msg.push(', though there are conflicts');
+            }
+            if (branchesWithConflicts.length > 1) {
+              if (targetBranches.length === branchesWithConflicts.length) {
+                msg.push(' in all branches');
+              } else if (targetBranches.length > 1) {
+                const conflicts = branchesWithConflicts.join(', ');
+                msg.push(` in ${conflicts}`);
+              }
+            }
+            res.send(msg.join('') + '.');
           })
       });
+
     })
+
+    // send all errors to chat client
     .catch(err => robot.emit('error', err));
   });
 

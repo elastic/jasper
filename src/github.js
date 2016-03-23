@@ -33,6 +33,8 @@ function getCommits(resource) {
 
 function getDiff(pr) {
   const { repo, number } = pr;
+  if (!repo) throw new Error('You must specify a repo to get a diff');
+  if (!number) throw new Error('You must specify a number to get a diff');
   const url = `https://patch-diff.githubusercontent.com/raw/${repo}/pull/${number}.diff`;
   return requestGet(url).then(res => res.body);
 }
