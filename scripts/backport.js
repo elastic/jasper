@@ -157,8 +157,10 @@ function backport(robot, res, repo, number, targetBranches) {
     const fromProxyPr = () => areDifferentPrs(workingPr, originalPr);
 
     function backportBranchName(target) {
-      // this must include working PR until we allow commandeering branches
-      return `jasper/backport/${originalPr.number}/${workingPr.number}/${target}`;
+      const prnum = fromProxyPr()
+        ? `${originalPr.number}/${workingPr.number}`
+        : `${workingPr.number}`;
+      return `jasper/backport/${prnum}/${target}`;
     }
 
     const branchesWithConflicts = [];
@@ -170,6 +172,13 @@ function backport(robot, res, repo, number, targetBranches) {
         .reduce((promise, target) => {
           return promise
             .then(() => git('checkout', target))
+            .then(() => git('reset', '--hard', 'HEAD'))
+            .then(() => git('checkout', target))
+            .then(() => {
+              return git('branch', '-D', backportBranchName(target)).catch(err => {
+                if (!includes(err.message, 'not found')) throw err;
+              });
+            })
             .then(() => git('checkout', '-b', backportBranchName(target)))
             .then(() => diffPath())
             .then(path => {
