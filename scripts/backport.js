@@ -9,6 +9,7 @@
 const { cloneDeep, includes, once } = require('lodash');
 const { resolve } = require('path');
 
+const { sendError } = require('../src/error');
 const { createIssue, createPullRequest, getCommits, getDiff, getInfo } = require('../src/github');
 const { openOrClone } = require('../src/git');
 const { createTmpFile } = require('../src/tmp');
@@ -257,5 +258,7 @@ function backport(robot, res, repo, number, targetBranches) {
           res.send(msg.join('') + '.');
         })
     });
-  });
+  })
+
+  .catch(err => sendError(robot, res, err));
 }
