@@ -16,7 +16,6 @@ const { createTmpFile } = require('../src/tmp');
 
 const BACKPORT_REGEX = /backport (\S+) ((?:\S *)+)/;
 const PR_URL_REGEX = /^https\:\/\/github.com\/([^\/]+\/[^\/]+)\/pull\/(\d+)$/;
-const CONFLICTS_REGEX = /applied patch to \'.+\' with conflicts/i;
 
 function areDifferentPrs(pr1, pr2) {
   return pr1.number !== pr2.number;
@@ -164,7 +163,7 @@ function backport(robot, res, repo, number, targetBranches) {
       return `jasper/backport/${prnum}/${target}`;
     }
 
-    const branchesWithConflicts = [];
+    const branchesWithConflicts = new Map();
 
     const repo = workingPr.base.repo;
     const repoDir = resolve(__dirname, '..', 'repos', repo.full_name);
@@ -183,9 +182,10 @@ function backport(robot, res, repo, number, targetBranches) {
             .then(() => git('checkout', '-b', backportBranchName(target)))
             .then(() => diffPath())
             .then(path => {
-              return git('apply', '--3way', path).catch(err => {
-                if (!CONFLICTS_REGEX.test(err.message)) throw err;
-                branchesWithConflicts.push(target);
+              return git('apply', '--reject', path).catch(err => {
+                const matches = err.message.match(/applying patch .* with \d+ reject/gi);
+                if (!matches) throw err;
+                branchesWithConflicts.set(target, matches.length);
               });
             })
             .then(() => git('add', '.'))
@@ -223,7 +223,7 @@ function backport(robot, res, repo, number, targetBranches) {
                 labels: [ 'backport' ]
               };
 
-              if (includes(branchesWithConflicts, target)) {
+              if (branchesWithConflicts.has(target)) {
                 params.labels.push('has conflicts');
               }
 
@@ -244,14 +244,14 @@ function backport(robot, res, repo, number, targetBranches) {
           if (fromProxyPr()) {
             msg.push(` (via PR #${workingPr.number})`);
           }
-          if (branchesWithConflicts.length) {
+          if (branchesWithConflicts.size) {
             msg.push(', though there are conflicts');
           }
-          if (branchesWithConflicts.length > 1) {
-            if (targetBranches.length === branchesWithConflicts.length) {
+          if (branchesWithConflicts.size > 1) {
+            if (targetBranches.length === branchesWithConflicts.size) {
               msg.push(' in all branches');
             } else if (targetBranches.length > 1) {
-              const conflicts = branchesWithConflicts.join(', ');
+              const conflicts = [...branchesWithConflicts.keys()].join(', ');
               msg.push(` in ${conflicts}`);
             }
           }
