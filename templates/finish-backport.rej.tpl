@@ -16,5 +16,5 @@ git stash
 git reset --hard HEAD^
 git stash apply --index
 
-git commit -m "$COMMIT_MSG"
+git commit -m "$COMMIT_MSG" --no-verify
 git push -f $REMOTE $BRANCH
