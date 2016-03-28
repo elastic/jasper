@@ -6,9 +6,10 @@
 
 'use strict';
 
-const { cloneDeep, includes, once } = require('lodash');
+const { cloneDeep, first, includes, last, once } = require('lodash');
 const { resolve } = require('path');
 
+const { createBackportFiles } = require('../src/backport');
 const { sendError } = require('../src/error');
 const { createIssue, createPullRequest, getCommits, getDiff, getInfo } = require('../src/github');
 const { openOrClone } = require('../src/git');
@@ -43,7 +44,7 @@ module.exports = robot => {
 };
 
 function backport(robot, res, repo, number, targetBranches) {
-  const { github } = robot;
+  const { github, template } = robot;
 
   const githubRepo = github.repo(repo);
   const pr = github.pr(repo, number);
@@ -87,50 +88,55 @@ function backport(robot, res, repo, number, targetBranches) {
     return getInfo(pr).then(originalPr => [ ...accumulator, originalPr ]);
   })
 
+  .then(accumulator => {
+    const [ workingPr ] = accumulator;
+
+    const { number } = workingPr;
+    const repo = workingPr.base.repo.full_name;
+    const pr = github.pr(repo, number);
+    return getCommits(pr)
+      .then(commits => [ ...accumulator, commits ]);
+  })
+
   // The pr/commit message gets built from the original PR's commits unless
   // we're using a different working PR. In that case, we inherit the working
   // PR's body.
   .then(accumulator => {
-    const [ workingPr, originalPr ] = accumulator;
+    const [ workingPr, originalPr, commits ] = accumulator;
 
     if (areDifferentPrs(workingPr, originalPr)) {
       return [ ...accumulator, workingPr.body ];
     }
 
     const { number } = workingPr;
-    const repo = workingPr.base.repo.full_name;
-    const pr = github.pr(repo, number);
-    return getCommits(pr).then(commits => {
-      let num = 0;
+    let num = 0;
+    const commitMsgs = commits.map(data => {
+      const { commit, sha } = data;
+      const { author, committer, message } = commit;
 
-      const commitMsgs = commits.map(data => {
-        const { commit, sha } = data;
-        const { author, committer, message } = commit;
-
-        num++;
-
-        const msg = [
-          `**Commit ${num}:**`,
-          `${message}\n`,
-          `* Original sha: ${sha}`,
-          `* Authored by ${author.name} <${author.email}> on ${author.date}`
-        ];
-
-        if (author.email !== committer.email) {
-          msg.push(`* Committed by ${committer.name} <${committer.email}> on ${committer.date}`);
-        }
-
-        return msg.join('\n'); // between lines of an individual message
-      }).join('\n\n'); // between messages
+      num++;
 
       const msg = [
-        `Backport PR #${number}`,
-        '---------\n',
-        commitMsgs
-      ].join('\n');
+        `**Commit ${num}:**`,
+        `${message}\n`,
+        `* Original sha: ${sha}`,
+        `* Authored by ${author.name} <${author.email}> on ${author.date}`
+      ];
 
-      return [ ...accumulator, msg ];
-    });
+      if (author.email !== committer.email) {
+        msg.push(`* Committed by ${committer.name} <${committer.email}> on ${committer.date}`);
+      }
+
+      return msg.join('\n'); // between lines of an individual message
+    }).join('\n\n'); // between messages
+
+    const msg = [
+      `Backport PR #${number}`,
+      '---------\n',
+      commitMsgs
+    ].join('\n');
+
+    return [ ...accumulator, msg ];
   })
 
   .then(accumulator => {
@@ -143,7 +149,7 @@ function backport(robot, res, repo, number, targetBranches) {
   })
 
   // we have all of the remote information we need to make this happen
-  .then(([ workingPr, originalPr, msg, diff ]) => {
+  .then(([ workingPr, originalPr, commits, msg, diff ]) => {
     let cleanupTmp = () => {};
     const diffPath = once(() => (
       createTmpFile(diff).then(([ path, destroy ]) => {
@@ -186,6 +192,17 @@ function backport(robot, res, repo, number, targetBranches) {
                 const matches = err.message.match(/applying patch .* with \d+ reject/gi);
                 if (!matches) throw err;
                 branchesWithConflicts.set(target, matches.length);
+
+                const pr = workingPr;
+                const output = err.message;
+                const branch = backportBranchName(target);
+                const starting = first(commits).sha;
+                const ending = last(commits).sha;
+                return git('clean', '-fdq')
+                  .then(() => git('checkout', '--', '.'))
+                  .then(() => createBackportFiles(robot.template, repoDir, {
+                    pr, target, output, branch, starting, ending, msg
+                  }));
               });
             })
             .then(() => git('add', '.'))
