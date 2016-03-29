@@ -178,8 +178,7 @@ function backport(robot, res, repo, number, targetBranches) {
         .reduce((promise, target) => {
           return promise
             .then(() => git('checkout', target))
-            .then(() => git('reset', '--hard', 'HEAD'))
-            .then(() => git('checkout', target))
+            .then(() => git('reset', '--hard', `origin/${target}`))
             .then(() => {
               return git('branch', '-D', backportBranchName(target)).catch(err => {
                 if (!includes(err.message, 'not found')) throw err;
