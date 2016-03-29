@@ -2,10 +2,9 @@
 
 REMOTE="upstream"
 BRANCH="${branch}"
+WORKING_BRANCH="tmp/$BRANCH"
 STARTING_SHA="${starting}"
 ENDING_SHA="${ending}"
-
-WORKING_BRANCH="tmp/$BRANCH"
 
 git fetch $REMOTE
 

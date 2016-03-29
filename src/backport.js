@@ -10,20 +10,30 @@ const writeFile = promisify(fs.writeFile);
 function createBackportFiles(template, path, params) {
   const { pr, target, output, branch, starting, ending, msg } = params;
 
-  return backportFile(template, path, pr, target, output)
+  return backportInstructionsFile(template, path, branch, pr, target, output)
+    .then(() => wrangleBackportFile(template, path, branch))
     .then(() => beginBackportFile(template, path, branch, starting, ending))
     .then(() => finishBackportFile(template, path, branch))
     .then(() => commitMsgBackportFile(path, msg));
 }
 
 function commitMsgBackportFile(path, msg) {
-  const name = 'commit-message-backport.rej';
+  const name = 'backport-commit-message.rej';
   const file = join(path, name);
   return writeFile(file, msg);
 }
 
+function wrangleBackportFile(template, path, branch) {
+  const name = 'backport-wrangle-into-commit.rej';
+  const file = join(path, name);
+
+  return template(name)
+    .then(compile => compile({ branch }))
+    .then(tpl => writeFile(file, tpl, { mode: 0o755 }));
+}
+
 function finishBackportFile(template, path, branch) {
-  const name = 'finish-backport.rej';
+  const name = 'backport-guided-finish.rej';
   const file = join(path, name);
 
   return template(name)
@@ -32,7 +42,7 @@ function finishBackportFile(template, path, branch) {
 }
 
 function beginBackportFile(template, path, branch, starting, ending) {
-  const name = 'begin-backport.rej';
+  const name = 'backport-guided-begin.rej';
   const file = join(path, name);
 
   return template(name)
@@ -40,8 +50,8 @@ function beginBackportFile(template, path, branch, starting, ending) {
     .then(tpl => writeFile(file, tpl, { mode: 0o755 }));
 }
 
-function backportFile(template, path, pr, target, output) {
-  const name = 'backport.rej.md';
+function backportInstructionsFile(template, path, branch, pr, target, output) {
+  const name = 'backport--instructions.rej';
   const file = join(path, name);
 
   const { number } = pr;
@@ -55,7 +65,7 @@ function backportFile(template, path, pr, target, output) {
   const missing = totalMatches(/error\: .*\: No such file or directory/gi, output);
 
   return template(name)
-    .then(compile => compile({ number, url, target, failed, succeeded, missing }))
+    .then(compile => compile({ branch, number, url, target, failed, succeeded, missing }))
     .then(tpl => writeFile(file, tpl));
 }
 
