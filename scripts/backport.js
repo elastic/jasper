@@ -54,14 +54,10 @@ function backport(robot, res, repo, number, targetBranches) {
 
   // The accumulator builds toward [ workingPr, originalPr, msg, diff ]
   .then(workingPr => {
-    const { base, merged } = workingPr;
+    const { base } = workingPr;
 
     if (includes(targetBranches, base.ref)) {
       throw new Error('Cannot backport into the same branch as the pull request itself');
-    }
-
-    if (!merged) {
-      throw new Error('Cannot backport unmerged pull requests');
     }
 
     // todo: check for 'has conflicts' label
@@ -89,7 +85,11 @@ function backport(robot, res, repo, number, targetBranches) {
   })
 
   .then(accumulator => {
-    const [ workingPr ] = accumulator;
+    const [ workingPr, originalPr ] = accumulator;
+
+    if (!originalPr.merged) {
+      throw new Error('Cannot backport when the original pull request is unmerged');
+    }
 
     const { number } = workingPr;
     const repo = workingPr.base.repo.full_name;
