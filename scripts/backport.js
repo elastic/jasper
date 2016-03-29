@@ -205,7 +205,7 @@ function backport(robot, res, repo, number, targetBranches) {
               });
             })
             .then(() => git('add', '.'))
-            .then(() => git('commit', '-m', msg));
+            .then(() => git('commit', '-m', msg, '--no-verify'));
         }, git('fetch', 'origin'))
         .then(() => {
           cleanupTmp(); // we're done with the diff file
