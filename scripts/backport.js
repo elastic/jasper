@@ -108,7 +108,7 @@ function backport(robot, res, repo, number, targetBranches) {
       return [ ...accumulator, workingPr.body ];
     }
 
-    const { number } = workingPr;
+    const { number, title } = workingPr;
     let num = 0;
     const commitMsgs = commits.map(data => {
       const { commit, sha } = data;
@@ -131,8 +131,8 @@ function backport(robot, res, repo, number, targetBranches) {
     }).join('\n\n'); // between messages
 
     const msg = [
-      `Backport PR #${number}`,
-      '---------\n',
+      `${title}\n`,
+      `Backports PR #${number}\n`,
       commitMsgs
     ].join('\n');
 
@@ -221,7 +221,7 @@ function backport(robot, res, repo, number, targetBranches) {
             targetBranches.map(target => {
               const head = backportBranchName(target);
 
-              const { merged_by, number } = originalPr;
+              const { merged_by, number, title } = originalPr;
 
               let body = msg;
               if (fromProxyPr()) {
@@ -233,7 +233,7 @@ function backport(robot, res, repo, number, targetBranches) {
               }
 
               const params = {
-                title: `[backport] PR #${number} to ${target}`,
+                title: `[${target}] ${title}`,
                 body,
                 assignee: merged_by.login,
                 labels: [ 'backport' ]
